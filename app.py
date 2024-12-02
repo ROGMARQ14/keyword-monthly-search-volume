@@ -2,9 +2,10 @@ import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
+import math
 
-def get_keyword_data(api_key, campaign_id, keywords=None, start_date=None, end_date=None):
-    """Get keyword data from SEOmonitor API"""
+def get_keyword_data_batch(api_key, campaign_id, offset=0, limit=1000, start_date=None, end_date=None):
+    """Get a batch of keyword data from SEOmonitor API"""
     base_url = "https://apigw.seomonitor.com/v3/rank-tracker/v3.0/keywords"
     
     headers = {
@@ -16,33 +17,63 @@ def get_keyword_data(api_key, campaign_id, keywords=None, start_date=None, end_d
         'campaign_id': campaign_id,
         'start_date': start_date or (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
         'end_date': end_date or datetime.now().strftime('%Y-%m-%d'),
-        'limit': 100
+        'limit': limit,
+        'offset': offset
     }
     
     try:
         response = requests.get(base_url, headers=headers, params=params)
         if response.status_code == 401:
             st.error("Authentication failed. Please check your API key.")
-            return []
+            return None
         response.raise_for_status()
-        data = response.json()
-        
-        results = []
-        if isinstance(data, list):  # API returns a list of keywords directly
-            for item in data:
-                keyword_data = {
-                    'keyword': item.get('keyword', ''),
-                    'search_volume': item.get('latest_search_volume', 0),
-                    'difficulty': item.get('difficulty', 0),
-                    'current_rank': item.get('current_rank', 0),
-                    'trend': item.get('trend', '')
-                }
-                results.append(keyword_data)
-                
-        return results
+        return response.json()
     except Exception as e:
         st.error(f"Error fetching keyword data: {str(e)}")
-        return []
+        return None
+
+def get_all_keyword_data(api_key, campaign_id, total_keywords=None, start_date=None, end_date=None):
+    """Get all keyword data with pagination"""
+    all_results = []
+    offset = 0
+    limit = 1000  # Increased batch size
+    
+    with st.progress(0) as progress_bar:
+        while True:
+            batch = get_keyword_data_batch(api_key, campaign_id, offset, limit, start_date, end_date)
+            if not batch:
+                break
+                
+            if isinstance(batch, list):
+                all_results.extend(batch)
+                
+                # Update progress
+                if total_keywords:
+                    progress = min(1.0, len(all_results) / total_keywords)
+                    progress_bar.progress(progress)
+                    
+                if len(batch) < limit:  # Last batch
+                    break
+                    
+                offset += limit
+            else:
+                break
+                
+    return all_results
+
+def process_results(data):
+    """Process the API results into a DataFrame"""
+    results = []
+    for item in data:
+        keyword_data = {
+            'keyword': item.get('keyword', ''),
+            'search_volume': int(item.get('search_data', {}).get('search_volume', 0) or 0),  # Handle None values
+            'difficulty': float(item.get('difficulty', 0) or 0),  # Handle None values
+            'current_rank': int(item.get('rank_data', {}).get('current_rank', 0) or 0),  # Handle None values
+            'trend': item.get('search_data', {}).get('trend', '')
+        }
+        results.append(keyword_data)
+    return results
 
 def main():
     st.title("Keyword Analysis Tool (SEOmonitor)")
@@ -69,24 +100,25 @@ def main():
                 return
                 
             with st.spinner('Fetching keyword data...'):
-                keywords = None
+                total_keywords = None
                 if uploaded_file:
                     try:
                         df = pd.read_csv(uploaded_file)
-                        keywords = df.iloc[:, 0].tolist()
+                        total_keywords = len(df.iloc[:, 0].tolist())
                     except Exception as e:
                         st.error(f"Error reading CSV file: {str(e)}")
                         return
                 
-                results = get_keyword_data(
+                results_data = get_all_keyword_data(
                     api_key=api_key,
                     campaign_id=campaign_id,
-                    keywords=keywords,
+                    total_keywords=total_keywords,
                     start_date=start_date.strftime('%Y-%m-%d'),
                     end_date=end_date.strftime('%Y-%m-%d')
                 )
                 
-                if results:
+                if results_data:
+                    results = process_results(results_data)
                     results_df = pd.DataFrame(results)
                     
                     st.write("### Results")
@@ -109,16 +141,16 @@ def main():
                         with col3:
                             st.metric("Avg Difficulty", f"{results_df['difficulty'].mean():.1f}")
                     
-                    csv = results_df.to_csv(index=False)
-                    st.download_button(
-                        "Download Results",
-                        csv,
-                        "keyword_analysis_results.csv",
-                        "text/csv",
-                        key='download-csv'
-                    )
-                else:
-                    st.warning("No results found for the specified parameters.")
+                        csv = results_df.to_csv(index=False)
+                        st.download_button(
+                            "Download Results",
+                            csv,
+                            "keyword_analysis_results.csv",
+                            "text/csv",
+                            key='download-csv'
+                        )
+                    else:
+                        st.warning("No results found for the specified parameters.")
     else:
         st.info("Please enter your SEOmonitor API key and campaign ID to proceed.")
 
