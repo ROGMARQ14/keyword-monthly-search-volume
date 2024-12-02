@@ -77,7 +77,8 @@ def get_keyword_data_batch(api_key, campaign_id, keyword_ids, start_date=None, e
         'campaign_id': campaign_id,
         'start_date': start_date,
         'end_date': end_date,
-        'keyword_ids': ','.join(map(str, keyword_ids))
+        'keyword_ids': ','.join(map(str, keyword_ids)),
+        'fields': 'search_data,keyword'  # Request specific fields including search data
     }
     
     try:
@@ -90,7 +91,13 @@ def get_keyword_data_batch(api_key, campaign_id, keyword_ids, start_date=None, e
             return None
             
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        
+        # Debug: Print the first item's structure
+        if isinstance(data, list) and len(data) > 0:
+            st.write("Debug - First API response item structure:", data[0])
+            
+        return data
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching keyword data: {str(e)}")
         return None
@@ -146,10 +153,40 @@ def process_results(data, original_keywords):
         try:
             keyword = item.get('keyword', '').lower()
             if keyword in results_dict:
-                search_volume = item.get('search_volume', 0)
+                # Try different possible locations for search volume in the API response
+                search_volume = None
+                
+                # Try to get from search_data
+                search_data = item.get('search_data', {})
+                if isinstance(search_data, dict):
+                    search_volume = search_data.get('monthly_searches')
+                    if search_volume is None:
+                        search_volume = search_data.get('search_volume')
+                    if search_volume is None:
+                        search_volume = search_data.get('volume')
+                
+                # If not found in search_data, try direct fields
+                if search_volume is None:
+                    search_volume = item.get('monthly_searches')
+                if search_volume is None:
+                    search_volume = item.get('search_volume')
+                if search_volume is None:
+                    search_volume = item.get('volume')
+                
+                # If we found a valid search volume, update the result
                 if search_volume is not None:
-                    results_dict[keyword]['search_volume'] = int(search_volume)
+                    try:
+                        search_volume = int(search_volume)
+                        results_dict[keyword]['search_volume'] = search_volume
+                    except (TypeError, ValueError):
+                        pass
+                
+                # Debug: Print the structure of items with zero search volume
+                if results_dict[keyword]['search_volume'] == 0:
+                    st.write(f"Debug - Zero search volume for keyword '{keyword}'. API response structure:", item)
+                
         except (TypeError, ValueError) as e:
+            st.write(f"Error processing keyword data: {str(e)}")
             continue
     
     return list(results_dict.values())
