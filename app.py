@@ -88,10 +88,24 @@ def process_results(data, original_keywords):
         try:
             keyword = item.get('keyword', '').lower()
             if keyword in results_dict:
-                search_volume = item.get('search_volume')
-                if search_volume is not None:
-                    results_dict[keyword]['search_volume'] = int(search_volume)
-        except (TypeError, ValueError):
+                # Try to get search volume from different possible locations in the API response
+                search_data = item.get('search_data', {})
+                if isinstance(search_data, dict):
+                    # Try to get from search_data
+                    if 'volume' in search_data:
+                        results_dict[keyword]['search_volume'] = int(search_data['volume'])
+                    elif 'search_volume' in search_data:
+                        results_dict[keyword]['search_volume'] = int(search_data['search_volume'])
+                    elif 'monthly_searches' in search_data:
+                        results_dict[keyword]['search_volume'] = int(search_data['monthly_searches'])
+                # If not found in search_data, try root level
+                elif 'volume' in item:
+                    results_dict[keyword]['search_volume'] = int(item['volume'])
+                elif 'search_volume' in item:
+                    results_dict[keyword]['search_volume'] = int(item['search_volume'])
+                elif 'monthly_searches' in item:
+                    results_dict[keyword]['search_volume'] = int(item['monthly_searches'])
+        except (TypeError, ValueError) as e:
             continue
     
     return list(results_dict.values())
