@@ -12,23 +12,39 @@ st.set_page_config(
     layout="wide"
 )
 
-def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_date=None):
-    """Get keyword data from SEOmonitor API"""
-    base_url = "https://apigw.seomonitor.com/v3/rank-tracker/keywords/get-keywords-data"
+def verify_campaign(api_key, campaign_id):
+    """Verify if the campaign ID exists"""
+    base_url = "https://api.seomonitor.com/v3/campaigns"
     
     headers = {
         'Accept': 'application/json',
-        'Authorization': api_key,
-        'Content-Type': 'application/json'
-    }
-    
-    data = {
-        'campaign_id': int(campaign_id),
-        'keywords': keywords
+        'Authorization': api_key
     }
     
     try:
-        response = requests.post(base_url, headers=headers, json=data)
+        response = requests.get(base_url, headers=headers)
+        if response.status_code == 401:
+            st.error("Authentication failed. Please check your API key.")
+            return False
+        response.raise_for_status()
+        campaigns = response.json()
+        st.write("Available campaigns:", campaigns)  # Debug print
+        return any(str(campaign.get('campaign_id')) == str(campaign_id) for campaign in campaigns)
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error verifying campaign: {str(e)}")
+        return False
+
+def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_date=None):
+    """Get keyword data from SEOmonitor API"""
+    base_url = f"https://api.seomonitor.com/v3/campaigns/{campaign_id}/keywords/search-data"
+    
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': api_key
+    }
+    
+    try:
+        response = requests.get(base_url, headers=headers)
         if response.status_code == 401:
             st.error("Authentication failed. Please check your API key.")
             return None
@@ -42,23 +58,18 @@ def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_
 
 def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None, end_date=None, batch_size=100):
     """Process keywords in batches"""
+    if not verify_campaign(api_key, campaign_id):
+        st.error("Invalid campaign ID. Please check your campaign ID and try again.")
+        return None
+        
     all_results = []
     total_batches = (len(keywords) + batch_size - 1) // batch_size
     
     progress_text = st.empty()
     
-    for batch_num in range(total_batches):
-        start_idx = batch_num * batch_size
-        end_idx = min((batch_num + 1) * batch_size, len(keywords))
-        current_batch = keywords[start_idx:end_idx]
-        
-        progress_text.text(f"Processing batch {batch_num + 1}/{total_batches} (keywords {start_idx + 1}-{end_idx})...")
-        
-        batch_data = get_keyword_data_batch(api_key, campaign_id, current_batch, start_date, end_date)
-        if batch_data:
-            all_results.extend(batch_data.get('keywords', []))
-        
-        time.sleep(0.1)  # Small delay to prevent rate limiting
+    batch_data = get_keyword_data_batch(api_key, campaign_id, keywords, start_date, end_date)
+    if batch_data:
+        all_results.extend(batch_data.get('keywords', []))
     
     progress_text.empty()
     return all_results
@@ -68,12 +79,17 @@ def process_results(data, original_keywords):
     # Create a dictionary with all keywords initialized to 0 search volume
     results_dict = {keyword: {'keyword': keyword, 'search_volume': 0} for keyword in original_keywords}
     
+    if isinstance(data, dict):
+        keyword_data = data.get('keywords', [])
+    else:
+        keyword_data = data or []
+        
     # Update search volumes for keywords found in the API response
-    for item in data:
+    for item in keyword_data:
         try:
             keyword = item.get('keyword', '')
             if keyword in results_dict:
-                search_volume = item.get('search_volume', 0)
+                search_volume = item.get('search_data', {}).get('search_volume', 0)
                 if search_volume is not None:
                     results_dict[keyword]['search_volume'] = int(search_volume)
         except (TypeError, ValueError) as e:
