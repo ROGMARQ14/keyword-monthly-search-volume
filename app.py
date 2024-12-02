@@ -35,6 +35,11 @@ def get_keyword_data(api_key, campaign_id, offset=0, start_date=None, end_date=N
     
     try:
         response = requests.get(base_url, headers=headers, params=params)
+        
+        # Debug response
+        st.write(f"Debug - API Request URL: {response.url}")
+        st.write(f"Debug - Response Status: {response.status_code}")
+        
         if response.status_code == 401:
             st.error("Authentication failed. Please check your API key.")
             return None
@@ -43,9 +48,17 @@ def get_keyword_data(api_key, campaign_id, offset=0, start_date=None, end_date=N
             return None
             
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        
+        # Debug first item if available
+        if isinstance(data, list) and len(data) > 0:
+            st.write("Debug - First item structure:", data[0])
+            
+        return data
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching keyword data: {str(e)}")
+        if hasattr(e, 'response') and hasattr(e.response, 'text'):
+            st.error(f"Response content: {e.response.text}")
         return None
 
 def process_keywords(api_key, campaign_id, keywords):
@@ -108,13 +121,42 @@ def process_results(data, original_keywords):
         try:
             keyword = item.get('keyword', '').lower()
             if keyword in results_dict:
-                # Try to get search volume from different possible locations in the API response
+                # Try multiple locations for search volume
+                search_volume = None
+                
+                # Try search_data first
                 search_data = item.get('search_data', {})
                 if isinstance(search_data, dict):
-                    search_volume = search_data.get('search_volume')
-                    if search_volume is not None:
-                        results_dict[keyword]['search_volume'] = int(search_volume)
+                    if 'search_volume' in search_data:
+                        search_volume = search_data['search_volume']
+                    elif 'monthly_searches' in search_data:
+                        search_volume = search_data['monthly_searches']
+                    elif 'volume' in search_data:
+                        search_volume = search_data['volume']
+                
+                # Try direct fields if not found in search_data
+                if search_volume is None:
+                    if 'search_volume' in item:
+                        search_volume = item['search_volume']
+                    elif 'monthly_searches' in item:
+                        search_volume = item['monthly_searches']
+                    elif 'volume' in item:
+                        search_volume = item['volume']
+                
+                # If we found a value, try to convert it
+                if search_volume is not None:
+                    try:
+                        search_volume = int(search_volume)
+                        results_dict[keyword]['search_volume'] = search_volume
+                    except (TypeError, ValueError):
+                        st.write(f"Debug - Could not convert search volume for '{keyword}': {search_volume}")
+                
+                # Debug zero volume items
+                if results_dict[keyword]['search_volume'] == 0:
+                    st.write(f"Debug - Zero volume item structure for '{keyword}':", item)
+                    
         except (TypeError, ValueError) as e:
+            st.write(f"Debug - Error processing item: {str(e)}")
             continue
     
     return list(results_dict.values())
