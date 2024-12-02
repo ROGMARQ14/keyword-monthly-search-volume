@@ -28,13 +28,14 @@ def get_keyword_data(api_key, campaign_id, keywords=None, start_date=None, end_d
         data = response.json()
         
         results = []
-        if data.get('keywords'):
-            for item in data['keywords']:
+        if isinstance(data, list):  # API returns a list of keywords directly
+            for item in data:
                 keyword_data = {
                     'keyword': item.get('keyword', ''),
-                    'search_volume': item.get('search_volume', {}).get('latest', 0),
+                    'search_volume': item.get('latest_search_volume', 0),
                     'difficulty': item.get('difficulty', 0),
-                    'rank': item.get('rank', {}).get('latest', 0)
+                    'current_rank': item.get('current_rank', 0),
+                    'trend': item.get('trend', '')
                 }
                 results.append(keyword_data)
                 
@@ -57,16 +58,25 @@ def main():
         # Date range selection
         col1, col2 = st.columns(2)
         with col1:
-            start_date = st.date_input("Start Date", datetime.now() - timedelta(days=30))
+            default_start = datetime.now() - timedelta(days=30)
+            start_date = st.date_input("Start Date", default_start, max_value=datetime.now())
         with col2:
-            end_date = st.date_input("End Date", datetime.now())
+            end_date = st.date_input("End Date", datetime.now(), min_value=start_date, max_value=datetime.now())
             
         if st.button("Get Keyword Data"):
+            if start_date > end_date:
+                st.error("Start date must be before end date")
+                return
+                
             with st.spinner('Fetching keyword data...'):
                 keywords = None
                 if uploaded_file:
-                    df = pd.read_csv(uploaded_file)
-                    keywords = df.iloc[:, 0].tolist()
+                    try:
+                        df = pd.read_csv(uploaded_file)
+                        keywords = df.iloc[:, 0].tolist()
+                    except Exception as e:
+                        st.error(f"Error reading CSV file: {str(e)}")
+                        return
                 
                 results = get_keyword_data(
                     api_key=api_key,
@@ -80,7 +90,24 @@ def main():
                     results_df = pd.DataFrame(results)
                     
                     st.write("### Results")
-                    st.dataframe(results_df)
+                    # Format the dataframe
+                    if not results_df.empty:
+                        results_df = results_df.sort_values('search_volume', ascending=False)
+                        st.dataframe(results_df.style.format({
+                            'search_volume': '{:,.0f}',
+                            'difficulty': '{:.1f}',
+                            'current_rank': '{:.0f}'
+                        }))
+                        
+                        # Show summary statistics
+                        st.write("### Summary Statistics")
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Total Keywords", len(results_df))
+                        with col2:
+                            st.metric("Avg Search Volume", f"{results_df['search_volume'].mean():,.0f}")
+                        with col3:
+                            st.metric("Avg Difficulty", f"{results_df['difficulty'].mean():.1f}")
                     
                     csv = results_df.to_csv(index=False)
                     st.download_button(
