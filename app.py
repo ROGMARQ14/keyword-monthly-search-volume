@@ -13,23 +13,28 @@ st.set_page_config(
 
 def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_date=None):
     """Get keyword data from SEOmonitor API"""
-    base_url = "https://api.seomonitor.com/v3/rank-tracker/keywords/search-data"
+    base_url = f"https://api.seomonitor.com/v3/campaigns/{campaign_id}/keywords/get-keywords-data"
     
     headers = {
         'Accept': 'application/json',
-        'Authorization': api_key
+        'Authorization': api_key,
+        'Content-Type': 'application/json'
     }
     
     # Convert keywords to the format expected by the API
     keyword_data = {
-        'campaign_id': int(campaign_id),
-        'keywords': keywords
+        'keyword_ids': [],  # We'll get all keywords
+        'date': datetime.now().strftime('%Y-%m-%d'),
+        'timeframe': 'latest'
     }
     
     try:
         response = requests.post(base_url, headers=headers, json=keyword_data)
         if response.status_code == 401:
             st.error("Authentication failed. Please check your API key.")
+            return None
+        elif response.status_code == 404:
+            st.error("Campaign not found. Please check your campaign ID.")
             return None
         response.raise_for_status()
         data = response.json()
@@ -42,22 +47,13 @@ def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_
 def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None, end_date=None, batch_size=100):
     """Process keywords in batches"""
     all_results = []
-    total_batches = (len(keywords) + batch_size - 1) // batch_size
     
     progress_text = st.empty()
+    progress_text.text("Fetching keyword data...")
     
-    for batch_num in range(total_batches):
-        start_idx = batch_num * batch_size
-        end_idx = min((batch_num + 1) * batch_size, len(keywords))
-        current_batch = keywords[start_idx:end_idx]
-        
-        progress_text.text(f"Processing batch {batch_num + 1}/{total_batches} (keywords {start_idx + 1}-{end_idx})...")
-        
-        batch_data = get_keyword_data_batch(api_key, campaign_id, current_batch, start_date, end_date)
-        if batch_data and isinstance(batch_data, dict) and 'details' in batch_data:
-            all_results.extend(batch_data['details'])
-        
-        time.sleep(0.1)  # Small delay to prevent rate limiting
+    batch_data = get_keyword_data_batch(api_key, campaign_id, keywords, start_date, end_date)
+    if batch_data and isinstance(batch_data, dict) and 'keywords' in batch_data:
+        all_results.extend(batch_data['keywords'])
     
     progress_text.empty()
     return all_results
@@ -65,14 +61,14 @@ def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None,
 def process_results(data, original_keywords):
     """Process the API results into a DataFrame"""
     # Create a dictionary with all keywords initialized to 0 search volume
-    results_dict = {keyword: {'keyword': keyword, 'search_volume': 0} for keyword in original_keywords}
+    results_dict = {keyword.lower(): {'keyword': keyword, 'search_volume': 0} for keyword in original_keywords}
     
     # Update search volumes for keywords found in the API response
     for item in data:
         try:
-            keyword = item.get('keyword', '')
+            keyword = item.get('keyword', '').lower()
             if keyword in results_dict:
-                search_volume = item.get('search_volume', 0)
+                search_volume = item.get('details', {}).get('search_volume', 0)
                 if search_volume is not None:
                     results_dict[keyword]['search_volume'] = int(search_volume)
         except (TypeError, ValueError) as e:
