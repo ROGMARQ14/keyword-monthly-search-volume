@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
-import time
+import math
 
 def get_keyword_data_batch(api_key, campaign_id, offset=0, limit=1000, start_date=None, end_date=None):
     """Get a batch of keyword data from SEOmonitor API"""
@@ -28,60 +28,51 @@ def get_keyword_data_batch(api_key, campaign_id, offset=0, limit=1000, start_dat
             return None
         response.raise_for_status()
         return response.json()
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         st.error(f"Error fetching keyword data: {str(e)}")
         return None
 
-def get_all_keyword_data(api_key, campaign_id, start_date=None, end_date=None):
+def get_all_keyword_data(api_key, campaign_id, total_keywords=None, start_date=None, end_date=None):
     """Get all keyword data with pagination"""
     all_results = []
     offset = 0
     limit = 1000  # Increased batch size
-    batch_number = 1
     
-    progress_text = st.empty()
-    
-    while True:
-        progress_text.text(f"Fetching batch {batch_number} (keywords {offset+1}-{offset+limit})...")
-        
-        batch = get_keyword_data_batch(api_key, campaign_id, offset, limit, start_date, end_date)
-        if not batch:
-            break
-            
-        if isinstance(batch, list):
-            all_results.extend(batch)
-            
-            if len(batch) < limit:  # Last batch
+    with st.progress(0) as progress_bar:
+        while True:
+            batch = get_keyword_data_batch(api_key, campaign_id, offset, limit, start_date, end_date)
+            if not batch:
                 break
                 
-            offset += limit
-            batch_number += 1
-            time.sleep(0.1)  # Small delay to prevent rate limiting
-        else:
-            break
-            
-    progress_text.empty()
+            if isinstance(batch, list):
+                all_results.extend(batch)
+                
+                # Update progress
+                if total_keywords:
+                    progress = min(1.0, len(all_results) / total_keywords)
+                    progress_bar.progress(progress)
+                    
+                if len(batch) < limit:  # Last batch
+                    break
+                    
+                offset += limit
+            else:
+                break
+                
     return all_results
 
 def process_results(data):
     """Process the API results into a DataFrame"""
     results = []
     for item in data:
-        try:
-            search_data = item.get('search_data', {}) or {}
-            rank_data = item.get('rank_data', {}) or {}
-            
-            keyword_data = {
-                'keyword': item.get('keyword', ''),
-                'search_volume': int(search_data.get('search_volume', 0) or 0),
-                'difficulty': float(item.get('difficulty', 0) or 0),
-                'current_rank': int(rank_data.get('current_rank', 0) or 0),
-                'trend': search_data.get('trend', '')
-            }
-            results.append(keyword_data)
-        except (TypeError, ValueError) as e:
-            st.warning(f"Error processing keyword {item.get('keyword', 'unknown')}: {str(e)}")
-            continue
+        keyword_data = {
+            'keyword': item.get('keyword', ''),
+            'search_volume': int(item.get('search_data', {}).get('search_volume', 0) or 0),  # Handle None values
+            'difficulty': float(item.get('difficulty', 0) or 0),  # Handle None values
+            'current_rank': int(item.get('rank_data', {}).get('current_rank', 0) or 0),  # Handle None values
+            'trend': item.get('search_data', {}).get('trend', '')
+        }
+        results.append(keyword_data)
     return results
 
 def main():
@@ -109,15 +100,24 @@ def main():
                 return
                 
             with st.spinner('Fetching keyword data...'):
+                total_keywords = None
+                if uploaded_file:
+                    try:
+                        df = pd.read_csv(uploaded_file)
+                        total_keywords = len(df.iloc[:, 0].tolist())
+                    except Exception as e:
+                        st.error(f"Error reading CSV file: {str(e)}")
+                        return
+                
                 results_data = get_all_keyword_data(
                     api_key=api_key,
                     campaign_id=campaign_id,
+                    total_keywords=total_keywords,
                     start_date=start_date.strftime('%Y-%m-%d'),
                     end_date=end_date.strftime('%Y-%m-%d')
                 )
                 
                 if results_data:
-                    st.success(f"Successfully retrieved {len(results_data)} keywords")
                     results = process_results(results_data)
                     results_df = pd.DataFrame(results)
                     
@@ -140,7 +140,7 @@ def main():
                             st.metric("Avg Search Volume", f"{results_df['search_volume'].mean():,.0f}")
                         with col3:
                             st.metric("Avg Difficulty", f"{results_df['difficulty'].mean():.1f}")
-                        
+                    
                         csv = results_df.to_csv(index=False)
                         st.download_button(
                             "Download Results",
