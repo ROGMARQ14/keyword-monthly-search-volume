@@ -4,241 +4,152 @@ import requests
 from datetime import datetime, timedelta
 import time
 
-st.set_page_config(
-    page_title="SEO Keyword Analyzer",
-    page_icon="📈",
-    layout="wide"
-)
-
-def get_keyword_data(api_key, campaign_id, offset=0, start_date=None, end_date=None):
+def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_date=None):
     """Get keyword data from SEOmonitor API"""
-    base_url = "https://api.seomonitor.com/v3/rank-tracker/v3.0/keywords"
+    base_url = "https://apigw.seomonitor.com/v3/rank-tracker/v3.0/keywords"
     
     headers = {
         'Accept': 'application/json',
         'Authorization': api_key
     }
     
-    # Format dates as required by the API
-    if not start_date:
-        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-    if not end_date:
-        end_date = datetime.now().strftime('%Y-%m-%d')
-    
     params = {
         'campaign_id': campaign_id,
-        'start_date': start_date,
-        'end_date': end_date,
-        'limit': '100',
-        'offset': str(offset)
+        'start_date': start_date or (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
+        'end_date': end_date or datetime.now().strftime('%Y-%m-%d'),
+        'keywords': ','.join(keywords)  # Send keywords as comma-separated list
     }
     
     try:
         response = requests.get(base_url, headers=headers, params=params)
-        
-        # Debug response
-        st.write(f"Debug - API Request URL: {response.url}")
-        st.write(f"Debug - Response Status: {response.status_code}")
-        
         if response.status_code == 401:
             st.error("Authentication failed. Please check your API key.")
             return None
-        elif response.status_code == 404:
-            st.error("Campaign not found. Please check your campaign ID.")
-            return None
-            
         response.raise_for_status()
-        data = response.json()
-        
-        # Debug first item if available
-        if isinstance(data, list) and len(data) > 0:
-            st.write("Debug - First item structure:", data[0])
-            
-        return data
+        return response.json()
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching keyword data: {str(e)}")
-        if hasattr(e, 'response') and hasattr(e.response, 'text'):
-            st.error(f"Response content: {e.response.text}")
         return None
 
-def process_keywords(api_key, campaign_id, keywords):
-    """Process keywords and get their search volumes"""
-    keyword_set = {k.lower() for k in keywords}
+def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None, end_date=None, batch_size=100):
+    """Process keywords in batches"""
     all_results = []
-    
-    # Initialize offset and total processed
-    offset = 0
-    total_processed = 0
-    max_retries = 10  # Maximum number of empty results before stopping
-    empty_results_count = 0
+    total_batches = (len(keywords) + batch_size - 1) // batch_size
     
     progress_text = st.empty()
-    progress_bar = st.progress(0)
     
-    while True:
-        progress_text.text(f"Processing keywords (offset: {offset})...")
-        progress_bar.progress(min(total_processed / len(keywords), 1.0))
+    for batch_num in range(total_batches):
+        start_idx = batch_num * batch_size
+        end_idx = min((batch_num + 1) * batch_size, len(keywords))
+        current_batch = keywords[start_idx:end_idx]
         
-        # Get batch of keywords from the campaign
-        batch_data = get_keyword_data(api_key, campaign_id, offset)
+        progress_text.text(f"Processing batch {batch_num + 1}/{total_batches} (keywords {start_idx + 1}-{end_idx})...")
         
-        if not batch_data or not isinstance(batch_data, list) or len(batch_data) == 0:
-            empty_results_count += 1
-            if empty_results_count >= max_retries:
-                break
-            offset += 100
-            continue
+        batch_data = get_keyword_data_batch(api_key, campaign_id, current_batch, start_date, end_date)
+        if batch_data and isinstance(batch_data, list):
+            all_results.extend(batch_data)
         
-        # Reset empty results counter if we got data
-        empty_results_count = 0
-        
-        # Process the batch
-        for item in batch_data:
-            if isinstance(item, dict):
-                keyword = item.get('keyword', '').lower()
-                if keyword in keyword_set:
-                    all_results.append(item)
-                    total_processed += 1
-        
-        # If we got less than the batch size, we've reached the end
-        if len(batch_data) < 100:
-            break
-            
-        offset += 100
+        time.sleep(0.1)  # Small delay to prevent rate limiting
     
     progress_text.empty()
-    progress_bar.empty()
-    
-    return process_results(all_results, keywords)
+    return all_results
 
 def process_results(data, original_keywords):
     """Process the API results into a DataFrame"""
     # Create a dictionary with all keywords initialized to 0 search volume
-    results_dict = {keyword.lower(): {'keyword': keyword, 'search_volume': 0} for keyword in original_keywords}
+    results_dict = {keyword: {'keyword': keyword, 'search_volume': 0} for keyword in original_keywords}
     
     # Update search volumes for keywords found in the API response
     for item in data:
         try:
-            keyword = item.get('keyword', '').lower()
+            keyword = item.get('keyword', '')
             if keyword in results_dict:
-                # Try multiple locations for search volume
-                search_volume = None
-                
-                # Try search_data first
-                search_data = item.get('search_data', {})
-                if isinstance(search_data, dict):
-                    if 'search_volume' in search_data:
-                        search_volume = search_data['search_volume']
-                    elif 'monthly_searches' in search_data:
-                        search_volume = search_data['monthly_searches']
-                    elif 'volume' in search_data:
-                        search_volume = search_data['volume']
-                
-                # Try direct fields if not found in search_data
-                if search_volume is None:
-                    if 'search_volume' in item:
-                        search_volume = item['search_volume']
-                    elif 'monthly_searches' in item:
-                        search_volume = item['monthly_searches']
-                    elif 'volume' in item:
-                        search_volume = item['volume']
-                
-                # If we found a value, try to convert it
-                if search_volume is not None:
-                    try:
-                        search_volume = int(search_volume)
-                        results_dict[keyword]['search_volume'] = search_volume
-                    except (TypeError, ValueError):
-                        st.write(f"Debug - Could not convert search volume for '{keyword}': {search_volume}")
-                
-                # Debug zero volume items
-                if results_dict[keyword]['search_volume'] == 0:
-                    st.write(f"Debug - Zero volume item structure for '{keyword}':", item)
-                    
+                search_data = item.get('search_data', {}) or {}
+                results_dict[keyword]['search_volume'] = int(search_data.get('search_volume', 0) or 0)
         except (TypeError, ValueError) as e:
-            st.write(f"Debug - Error processing item: {str(e)}")
+            st.warning(f"Error processing keyword {item.get('keyword', 'unknown')}: {str(e)}")
             continue
     
     return list(results_dict.values())
 
 def main():
-    st.title("SEO Keyword Analyzer 📈")
+    st.title("Keyword Search Volume Tool (SEOmonitor)")
+    st.write("Upload a CSV file with keywords and enter your SEOmonitor credentials to get search volumes.")
     
-    # Initialize session state
-    if 'show_zero_volume' not in st.session_state:
-        st.session_state.show_zero_volume = True
+    # API credentials input
+    api_key = st.text_input("SEOmonitor API Key", type="password")
+    campaign_id = st.text_input("Campaign ID")
     
-    # Create columns for the form
-    col1, col2 = st.columns(2)
+    uploaded_file = st.file_uploader("Choose a CSV file with keywords", type="csv")
     
-    with col1:
-        api_key = st.text_input("API Key", type="password")
-    
-    with col2:
-        campaign_id = st.text_input("Campaign ID")
-    
-    # File uploader
-    uploaded_file = st.file_uploader("Upload Keywords CSV", type=['csv', 'txt'])
-    
-    if uploaded_file:
+    if api_key and campaign_id and uploaded_file:
         try:
             df = pd.read_csv(uploaded_file)
-            keywords = df.iloc[:, 0].tolist()  # Take the first column
-            st.write(f"Found {len(keywords)} keywords in the file.")
+            keywords = df.iloc[:, 0].dropna().astype(str).tolist()
+            keywords = [k.strip() for k in keywords if k.strip()]  # Clean the keywords
             
-            # Button to get search volumes
-            if st.button("Get Search Volumes 🔍"):
-                if not api_key or not campaign_id:
-                    st.error("Please provide both API Key and Campaign ID.")
-                else:
-                    results = process_keywords(api_key, campaign_id, keywords)
+            st.info(f"Found {len(keywords)} keywords in the CSV file")
+            
+            # Date range selection
+            col1, col2 = st.columns(2)
+            with col1:
+                default_start = datetime.now() - timedelta(days=30)
+                start_date = st.date_input("Start Date", default_start, max_value=datetime.now())
+            with col2:
+                end_date = st.date_input("End Date", datetime.now(), min_value=start_date, max_value=datetime.now())
+                
+            if st.button("Get Search Volumes"):
+                if start_date > end_date:
+                    st.error("Start date must be before end date")
+                    return
                     
-                    if results:
-                        # Convert results to DataFrame
-                        df_results = pd.DataFrame(results)
-                        
-                        # Results section
-                        st.header("📊 Results")
-                        
-                        # Checkbox for showing zero volume keywords
-                        st.session_state.show_zero_volume = st.checkbox(
-                            "Show keywords with zero search volume",
-                            value=st.session_state.show_zero_volume
-                        )
-                        
-                        # Filter based on checkbox
-                        if not st.session_state.show_zero_volume:
-                            df_results = df_results[df_results['search_volume'] > 0]
-                        
-                        # Summary statistics
-                        st.subheader("📈 Summary Statistics")
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            st.metric("Total Keywords 📝", len(df_results))
-                        
-                        with col2:
-                            avg_volume = int(df_results['search_volume'].mean())
-                            st.metric("Avg Search Volume 🔍", avg_volume)
-                        
-                        with col3:
-                            total_volume = int(df_results['search_volume'].sum())
-                            st.metric("Total Search Volume 📊", total_volume)
-                        
-                        # Display results table
-                        st.dataframe(df_results)
-                        
-                        # Download button
-                        csv = df_results.to_csv(index=False)
-                        st.download_button(
-                            label="Download Results CSV 📥",
-                            data=csv,
-                            file_name="keyword_volumes.csv",
-                            mime="text/csv"
-                        )
+                with st.spinner('Fetching search volumes...'):
+                    results_data = process_keywords_in_batches(
+                        api_key=api_key,
+                        campaign_id=campaign_id,
+                        keywords=keywords,
+                        start_date=start_date.strftime('%Y-%m-%d'),
+                        end_date=end_date.strftime('%Y-%m-%d')
+                    )
                     
+                    if results_data is not None:
+                        results = process_results(results_data, keywords)
+                        results_df = pd.DataFrame(results)
+                        
+                        st.write("### Results")
+                        if not results_df.empty:
+                            # Filter out zero search volumes if requested
+                            show_zeros = st.checkbox("Show keywords with zero search volume", value=True)
+                            if not show_zeros:
+                                results_df = results_df[results_df['search_volume'] > 0]
+                            
+                            results_df = results_df.sort_values('search_volume', ascending=False)
+                            st.dataframe(results_df.style.format({
+                                'search_volume': '{:,.0f}'
+                            }))
+                            
+                            # Show summary statistics
+                            st.write("### Summary Statistics")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("Total Keywords", len(results_df))
+                            with col2:
+                                st.metric("Avg Search Volume", f"{results_df['search_volume'].mean():,.0f}")
+                            
+                            csv = results_df.to_csv(index=False)
+                            st.download_button(
+                                "Download Results",
+                                csv,
+                                "keyword_search_volumes.csv",
+                                "text/csv",
+                                key='download-csv'
+                            )
+                        else:
+                            st.warning("No results found for the specified parameters.")
         except Exception as e:
-            st.error(f"Error processing file: {str(e)}")
+            st.error(f"Error processing CSV file: {str(e)}")
+    else:
+        st.info("Please upload a CSV file and enter your SEOmonitor credentials to proceed.")
 
 if __name__ == "__main__":
     main()
