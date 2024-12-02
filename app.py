@@ -20,12 +20,18 @@ def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_
         'Authorization': api_key
     }
     
+    # Format dates as required by the API
+    if not start_date:
+        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    if not end_date:
+        end_date = datetime.now().strftime('%Y-%m-%d')
+    
     params = {
         'campaign_id': campaign_id,
         'start_date': start_date,
         'end_date': end_date,
-        'limit': 1000,
-        'offset': 0
+        'group_id': '0',  # Get all keywords
+        'limit': '1000'
     }
     
     try:
@@ -38,19 +44,9 @@ def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_
             return None
             
         response.raise_for_status()
-        data = response.json()
-        
-        # Debug output
-        st.write("API Response Headers:", dict(response.headers))
-        st.write("API Response Status:", response.status_code)
-        st.write("API Response:", data)
-        
-        return data
+        return response.json()
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching keyword data: {str(e)}")
-        st.write("Full error:", str(e))
-        if hasattr(e, 'response') and e.response is not None:
-            st.write("Error response:", e.response.text)
         return None
 
 def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None, end_date=None, batch_size=100):
@@ -63,24 +59,12 @@ def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None,
     # Get all keywords from the campaign
     campaign_data = get_keyword_data_batch(api_key, campaign_id, keywords, start_date, end_date)
     
-    if campaign_data:
-        # Debug output
-        st.write("Number of keywords in campaign data:", len(campaign_data) if isinstance(campaign_data, list) else "Not a list")
-        
-        if isinstance(campaign_data, list):
-            # Filter for only our keywords of interest
-            keyword_set = {k.lower() for k in keywords}
-            for item in campaign_data:
-                if isinstance(item, dict):
-                    keyword = item.get('keyword', '').lower()
-                    if keyword in keyword_set:
-                        # Debug output for matching keywords
-                        st.write(f"Found matching keyword: {keyword}")
-                        st.write("Keyword data:", item)
-                        all_results.append(item)
-    
-    # Debug output
-    st.write("Total matching keywords found:", len(all_results))
+    if campaign_data and isinstance(campaign_data, list):
+        # Filter for only our keywords of interest
+        keyword_set = {k.lower() for k in keywords}
+        for item in campaign_data:
+            if isinstance(item, dict) and item.get('keyword', '').lower() in keyword_set:
+                all_results.append(item)
     
     progress_text.empty()
     return all_results
@@ -90,33 +74,18 @@ def process_results(data, original_keywords):
     # Create a dictionary with all keywords initialized to 0 search volume
     results_dict = {keyword.lower(): {'keyword': keyword, 'search_volume': 0} for keyword in original_keywords}
     
-    # Debug output
-    st.write("Processing results for keywords:", original_keywords)
-    
     # Update search volumes for keywords found in the API response
     for item in data:
         try:
             keyword = item.get('keyword', '').lower()
             if keyword in results_dict:
-                # The search volume might be nested differently in the API response
-                # Try different possible locations
-                search_volume = 0
-                if 'search_data' in item:
-                    search_volume = item['search_data'].get('search_volume', 0)
-                elif 'details' in item:
-                    search_volume = item['details'].get('search_volume', 0)
-                elif 'search_volume' in item:
-                    search_volume = item['search_volume']
-                
-                # Debug output
-                st.write(f"Found data for keyword '{keyword}':")
-                st.write("Raw item data:", item)
-                st.write("Extracted search volume:", search_volume)
-                
-                if search_volume is not None:
-                    results_dict[keyword]['search_volume'] = int(search_volume)
+                # Try to get search volume from different possible locations in the API response
+                search_data = item.get('search_data', {})
+                if isinstance(search_data, dict):
+                    search_volume = search_data.get('search_volume')
+                    if search_volume is not None:
+                        results_dict[keyword]['search_volume'] = int(search_volume)
         except (TypeError, ValueError) as e:
-            st.warning(f"Error processing keyword {item.get('keyword', 'unknown')}: {str(e)}")
             continue
     
     return list(results_dict.values())
