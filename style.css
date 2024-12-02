@@ -1,0 +1,126 @@
+/* Main styles */
+body {
+    background-color: #E4DDCB;
+    color: #003737;
+}
+
+.main {
+    padding: 2rem;
+}
+
+/* Header styling */
+.header-container {
+    display: flex;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding: 1rem;
+    background-color: #003737;
+    border-radius: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.logo-title-container {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+/* Custom title styles */
+.custom-title {
+    color: #E4DDCB;
+    font-size: 2.5rem;
+    font-weight: bold;
+    margin: 0;
+}
+
+.subtitle {
+    color: #E4DDCB;
+    font-size: 1.2rem;
+    margin-top: 0.5rem;
+}
+
+/* Input fields styling */
+.stTextInput > div > div > input {
+    border-radius: 5px;
+    border: 2px solid #34CCBF;
+}
+
+/* Button styling */
+.stButton > button {
+    background-color: #34CCBF;
+    color: #003737;
+    border-radius: 5px;
+    padding: 0.5rem 2rem;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
+    font-weight: bold;
+}
+
+.stButton > button:hover {
+    background-color: #003737;
+    color: #E4DDCB;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+/* Results section styling */
+.results-container {
+    background-color: #003737;
+    color: #E4DDCB;
+    padding: 1.5rem;
+    border-radius: 10px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    margin-top: 2rem;
+}
+
+/* Metrics styling */
+.metrics-container {
+    background-color: #34CCBF;
+    color: #003737;
+    padding: 1rem;
+    border-radius: 8px;
+    margin: 1rem 0;
+}
+
+/* DataFrame styling */
+.dataframe-container {
+    border: 1px solid #34CCBF;
+    border-radius: 8px;
+    overflow: hidden;
+    background-color: #E4DDCB;
+}
+
+/* Progress bar styling */
+.stProgress > div > div > div > div {
+    background-color: #34CCBF;
+}
+
+/* Download button styling */
+.download-button {
+    background-color: #34CCBF;
+    color: #003737;
+    padding: 0.5rem 1rem;
+    border-radius: 5px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-weight: bold;
+}
+
+.download-button:hover {
+    background-color: #003737;
+    color: #E4DDCB;
+}
+
+/* Info messages */
+.stAlert {
+    background-color: #34CCBF;
+    color: #003737;
+    border: none;
+    border-radius: 8px;
+}
+
+/* Checkbox styling */
+.stCheckbox > label > div[role="checkbox"] {
+    background-color: #34CCBF !important;
+}
