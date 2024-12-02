@@ -12,20 +12,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Load custom CSS
-with open('style.css') as f:
-    st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
-
-# Create a simple logo using emoji and styling
-def create_logo_html():
-    return """
-    <div style="font-size: 3rem; background: linear-gradient(45deg, #1f77b4, #ff7f0e); 
-                -webkit-background-clip: text; -webkit-text-fill-color: transparent; 
-                padding: 10px; border-radius: 10px;">
-        📊
-    </div>
-    """
-
 def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_date=None):
     """Get keyword data from SEOmonitor API"""
     base_url = "https://apigw.seomonitor.com/v3/rank-tracker/v3.0/keywords"
