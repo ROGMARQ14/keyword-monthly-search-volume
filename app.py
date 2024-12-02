@@ -3,14 +3,6 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 import time
-import base64
-
-# Page configuration
-st.set_page_config(
-    page_title="Keyword Search Volume Tool",
-    page_icon="📊",
-    layout="wide"
-)
 
 def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_date=None):
     """Get keyword data from SEOmonitor API"""
@@ -81,33 +73,14 @@ def process_results(data, original_keywords):
     return list(results_dict.values())
 
 def main():
-    # Header with logo
-    st.markdown(
-        f"""
-        <div class="header-container">
-            <div class="logo-title-container">
-                {create_logo_html()}
-                <div>
-                    <h1 class="custom-title">Keyword Search Volume Tool</h1>
-                    <p class="subtitle">Get search volumes for your keywords using SEOmonitor API</p>
-                </div>
-            </div>
-        </div>
-        """, 
-        unsafe_allow_html=True
-    )
+    st.title("Keyword Search Volume Tool (SEOmonitor)")
+    st.write("Upload a CSV file with keywords and enter your SEOmonitor credentials to get search volumes.")
     
-    # Create columns for the form
-    col1, col2 = st.columns(2)
+    # API credentials input
+    api_key = st.text_input("SEOmonitor API Key", type="password")
+    campaign_id = st.text_input("Campaign ID")
     
-    with col1:
-        # API credentials input
-        api_key = st.text_input("SEOmonitor API Key 🔑", type="password")
-    
-    with col2:
-        campaign_id = st.text_input("Campaign ID 📋")
-    
-    uploaded_file = st.file_uploader("Choose a CSV file with keywords 📁", type="csv")
+    uploaded_file = st.file_uploader("Choose a CSV file with keywords", type="csv")
     
     if api_key and campaign_id and uploaded_file:
         try:
@@ -115,22 +88,22 @@ def main():
             keywords = df.iloc[:, 0].dropna().astype(str).tolist()
             keywords = [k.strip() for k in keywords if k.strip()]  # Clean the keywords
             
-            st.info(f"📋 Found {len(keywords):,} keywords in the CSV file")
+            st.info(f"Found {len(keywords)} keywords in the CSV file")
             
             # Date range selection
-            date_col1, date_col2 = st.columns(2)
-            with date_col1:
+            col1, col2 = st.columns(2)
+            with col1:
                 default_start = datetime.now() - timedelta(days=30)
-                start_date = st.date_input("Start Date 📅", default_start, max_value=datetime.now())
-            with date_col2:
-                end_date = st.date_input("End Date 📅", datetime.now(), min_value=start_date, max_value=datetime.now())
+                start_date = st.date_input("Start Date", default_start, max_value=datetime.now())
+            with col2:
+                end_date = st.date_input("End Date", datetime.now(), min_value=start_date, max_value=datetime.now())
                 
-            if st.button("Get Search Volumes 🔍"):
+            if st.button("Get Search Volumes"):
                 if start_date > end_date:
-                    st.error("❌ Start date must be before end date")
+                    st.error("Start date must be before end date")
                     return
                     
-                with st.spinner('🔄 Fetching search volumes...'):
+                with st.spinner('Fetching search volumes...'):
                     results_data = process_keywords_in_batches(
                         api_key=api_key,
                         campaign_id=campaign_id,
@@ -143,58 +116,40 @@ def main():
                         results = process_results(results_data, keywords)
                         results_df = pd.DataFrame(results)
                         
-                        st.markdown('<div class="results-container">', unsafe_allow_html=True)
-                        st.markdown("### 📊 Results")
+                        st.write("### Results")
                         if not results_df.empty:
                             # Filter out zero search volumes if requested
-                            show_zeros = st.checkbox("Show keywords with zero search volume 👁️", value=True)
+                            show_zeros = st.checkbox("Show keywords with zero search volume", value=True)
                             if not show_zeros:
                                 results_df = results_df[results_df['search_volume'] > 0]
                             
                             results_df = results_df.sort_values('search_volume', ascending=False)
+                            st.dataframe(results_df.style.format({
+                                'search_volume': '{:,.0f}'
+                            }))
                             
                             # Show summary statistics
-                            st.markdown('<div class="metrics-container">', unsafe_allow_html=True)
-                            st.markdown("### 📈 Summary Statistics")
-                            metric_col1, metric_col2, metric_col3 = st.columns(3)
-                            with metric_col1:
-                                st.metric("Total Keywords 📝", f"{len(results_df):,}")
-                            with metric_col2:
-                                st.metric("Avg Search Volume 🔍", f"{results_df['search_volume'].mean():,.0f}")
-                            with metric_col3:
-                                st.metric("Total Search Volume 📊", f"{results_df['search_volume'].sum():,.0f}")
-                            st.markdown('</div>', unsafe_allow_html=True)
+                            st.write("### Summary Statistics")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("Total Keywords", len(results_df))
+                            with col2:
+                                st.metric("Avg Search Volume", f"{results_df['search_volume'].mean():,.0f}")
                             
-                            # Display dataframe
-                            st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
-                            st.dataframe(
-                                results_df.style.format({
-                                    'search_volume': '{:,.0f}'
-                                }).background_gradient(
-                                    subset=['search_volume'],
-                                    cmap='Blues'
-                                ),
-                                height=400
-                            )
-                            st.markdown('</div>', unsafe_allow_html=True)
-                            
-                            # Download button
                             csv = results_df.to_csv(index=False)
                             st.download_button(
-                                "⬇️ Download Results",
+                                "Download Results",
                                 csv,
                                 "keyword_search_volumes.csv",
                                 "text/csv",
-                                key='download-csv',
-                                help="Download the results as a CSV file"
+                                key='download-csv'
                             )
                         else:
-                            st.warning("⚠️ No results found for the specified parameters.")
-                        st.markdown('</div>', unsafe_allow_html=True)
+                            st.warning("No results found for the specified parameters.")
         except Exception as e:
-            st.error(f"❌ Error processing CSV file: {str(e)}")
+            st.error(f"Error processing CSV file: {str(e)}")
     else:
-        st.info("ℹ️ Please upload a CSV file and enter your SEOmonitor credentials to proceed.")
+        st.info("Please upload a CSV file and enter your SEOmonitor credentials to proceed.")
 
 if __name__ == "__main__":
     main()
