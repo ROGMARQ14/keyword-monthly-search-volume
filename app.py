@@ -13,23 +13,25 @@ st.set_page_config(
 
 def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_date=None):
     """Get keyword data from SEOmonitor API"""
-    base_url = f"https://api.seomonitor.com/v3/campaigns/{campaign_id}/keywords/get-keywords-data"
+    base_url = "https://apigw.seomonitor.com/v3/rank-tracker/v3.0/keywords"
     
     headers = {
         'Accept': 'application/json',
-        'Authorization': api_key,
-        'Content-Type': 'application/json'
+        'Authorization': api_key
     }
     
-    # Convert keywords to the format expected by the API
-    keyword_data = {
-        'keyword_ids': [],  # We'll get all keywords
-        'date': datetime.now().strftime('%Y-%m-%d'),
-        'timeframe': 'latest'
+    params = {
+        'campaign_id': campaign_id,
+        'start_date': start_date,
+        'end_date': end_date,
+        'order_by': 'search_volume',  # Sort by search volume
+        'order_direction': 'desc',    # Highest to lowest
+        'limit': 1000,                # Maximum allowed
+        'offset': 0                   # Start from beginning
     }
     
     try:
-        response = requests.post(base_url, headers=headers, json=keyword_data)
+        response = requests.get(base_url, headers=headers, params=params)
         if response.status_code == 401:
             st.error("Authentication failed. Please check your API key.")
             return None
@@ -37,9 +39,7 @@ def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_
             st.error("Campaign not found. Please check your campaign ID.")
             return None
         response.raise_for_status()
-        data = response.json()
-        st.write("API Response:", data)  # Debug output
-        return data
+        return response.json()
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching keyword data: {str(e)}")
         return None
@@ -51,9 +51,14 @@ def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None,
     progress_text = st.empty()
     progress_text.text("Fetching keyword data...")
     
+    # Get all keywords from the campaign
     batch_data = get_keyword_data_batch(api_key, campaign_id, keywords, start_date, end_date)
-    if batch_data and isinstance(batch_data, dict) and 'keywords' in batch_data:
-        all_results.extend(batch_data['keywords'])
+    if batch_data:
+        # Filter for only our keywords of interest
+        keyword_set = {k.lower() for k in keywords}
+        for item in batch_data:
+            if item.get('keyword', '').lower() in keyword_set:
+                all_results.append(item)
     
     progress_text.empty()
     return all_results
@@ -68,9 +73,8 @@ def process_results(data, original_keywords):
         try:
             keyword = item.get('keyword', '').lower()
             if keyword in results_dict:
-                search_volume = item.get('details', {}).get('search_volume', 0)
-                if search_volume is not None:
-                    results_dict[keyword]['search_volume'] = int(search_volume)
+                search_data = item.get('search_data', {}) or {}
+                results_dict[keyword]['search_volume'] = int(search_data.get('search_volume', 0) or 0)
         except (TypeError, ValueError) as e:
             st.warning(f"Error processing keyword {item.get('keyword', 'unknown')}: {str(e)}")
             continue
