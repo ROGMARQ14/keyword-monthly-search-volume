@@ -58,31 +58,24 @@ def get_keyword_ids(api_key, campaign_id, keywords):
         st.error(f"Error fetching keyword IDs: {str(e)}")
         return None
 
-def get_keyword_data_batch(api_key, campaign_id, keyword_ids, start_date=None, end_date=None):
+def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_date=None):
     """Get keyword data from SEOmonitor API"""
-    base_url = "https://api.seomonitor.com/v3/rank-tracker/v3.0/keywords"
+    base_url = "https://api.seomonitor.com/v3/research/keywords/get-search-data"
     
     headers = {
         'Accept': 'application/json',
-        'Authorization': api_key
+        'Authorization': api_key,
+        'Content-Type': 'application/json'
     }
     
-    # Format dates as required by the API
-    if not start_date:
-        start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-    if not end_date:
-        end_date = datetime.now().strftime('%Y-%m-%d')
-    
-    params = {
-        'campaign_id': campaign_id,
-        'start_date': start_date,
-        'end_date': end_date,
-        'keyword_ids': ','.join(map(str, keyword_ids)),
-        'fields': 'search_data,keyword'  # Request specific fields including search data
+    # Prepare the request data
+    data = {
+        'campaign_id': int(campaign_id),
+        'keywords': keywords
     }
     
     try:
-        response = requests.get(base_url, headers=headers, params=params)
+        response = requests.post(base_url, headers=headers, json=data)
         if response.status_code == 401:
             st.error("Authentication failed. Please check your API key.")
             return None
@@ -93,38 +86,29 @@ def get_keyword_data_batch(api_key, campaign_id, keyword_ids, start_date=None, e
         response.raise_for_status()
         data = response.json()
         
-        # Debug: Print the first item's structure
-        if isinstance(data, list) and len(data) > 0:
-            st.write("Debug - First API response item structure:", data[0])
-            
-        return data
+        # Debug: Print the response structure
+        st.write("Debug - API Response:", data)
+        
+        if isinstance(data, dict) and 'details' in data:
+            return data['details']
+        return None
+        
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching keyword data: {str(e)}")
         return None
 
-def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None, end_date=None, batch_size=100):
+def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None, end_date=None, batch_size=20):
     """Process keywords in batches"""
     all_results = []
+    total_batches = (len(keywords) + batch_size - 1) // batch_size
     
     progress_text = st.empty()
     progress_bar = st.progress(0)
     
-    # First get all keyword IDs
-    progress_text.text("Fetching keyword IDs...")
-    keyword_ids = get_keyword_ids(api_key, campaign_id, keywords)
-    
-    if not keyword_ids:
-        progress_text.text("No keyword IDs found.")
-        progress_bar.empty()
-        return []
-    
-    # Process keyword IDs in batches
-    total_batches = (len(keyword_ids) + batch_size - 1) // batch_size
-    
     for batch_num in range(total_batches):
         start_idx = batch_num * batch_size
-        end_idx = min((batch_num + 1) * batch_size, len(keyword_ids))
-        current_batch = keyword_ids[start_idx:end_idx]
+        end_idx = min((batch_num + 1) * batch_size, len(keywords))
+        current_batch = keywords[start_idx:end_idx]
         
         # Update progress
         progress = (batch_num + 1) / total_batches
@@ -133,7 +117,7 @@ def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None,
         
         # Get data for current batch
         batch_data = get_keyword_data_batch(api_key, campaign_id, current_batch, start_date, end_date)
-        if batch_data and isinstance(batch_data, list):
+        if batch_data:
             all_results.extend(batch_data)
         
         # Small delay to prevent rate limiting
@@ -153,38 +137,18 @@ def process_results(data, original_keywords):
         try:
             keyword = item.get('keyword', '').lower()
             if keyword in results_dict:
-                # Try different possible locations for search volume in the API response
-                search_volume = None
-                
-                # Try to get from search_data
-                search_data = item.get('search_data', {})
-                if isinstance(search_data, dict):
-                    search_volume = search_data.get('monthly_searches')
-                    if search_volume is None:
-                        search_volume = search_data.get('search_volume')
-                    if search_volume is None:
-                        search_volume = search_data.get('volume')
-                
-                # If not found in search_data, try direct fields
-                if search_volume is None:
-                    search_volume = item.get('monthly_searches')
-                if search_volume is None:
-                    search_volume = item.get('search_volume')
-                if search_volume is None:
-                    search_volume = item.get('volume')
-                
-                # If we found a valid search volume, update the result
+                search_volume = item.get('search_volume')
                 if search_volume is not None:
                     try:
                         search_volume = int(search_volume)
                         results_dict[keyword]['search_volume'] = search_volume
                     except (TypeError, ValueError):
-                        pass
+                        st.write(f"Error converting search volume for keyword '{keyword}': {search_volume}")
+                        continue
                 
-                # Debug: Print the structure of items with zero search volume
+                # Debug: Print items with zero search volume
                 if results_dict[keyword]['search_volume'] == 0:
-                    st.write(f"Debug - Zero search volume for keyword '{keyword}'. API response structure:", item)
-                
+                    st.write(f"Debug - Zero search volume for keyword '{keyword}'. API response item:", item)
         except (TypeError, ValueError) as e:
             st.write(f"Error processing keyword data: {str(e)}")
             continue
