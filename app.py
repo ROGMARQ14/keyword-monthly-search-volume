@@ -60,7 +60,7 @@ def get_keyword_ids(api_key, campaign_id, keywords):
 
 def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_date=None):
     """Get keyword data from SEOmonitor API"""
-    base_url = "https://api.seomonitor.com/v3/rank-tracker/bulk-traffic-keywords"
+    base_url = "https://api.seomonitor.com/v3/rank-tracker/keywords/get-search-data"
     
     headers = {
         'Accept': 'application/json',
@@ -71,7 +71,7 @@ def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_
     # Prepare the request data
     data = {
         'campaign_id': int(campaign_id),
-        'keywords': [{'keyword': k} for k in keywords]
+        'keywords': keywords
     }
     
     try:
@@ -95,15 +95,13 @@ def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_
         st.write("Debug - API Response:", data)
         
         # Extract keyword data from response
-        if isinstance(data, dict):
-            keywords_data = data.get('keywords', [])
-            if keywords_data:
-                return keywords_data
+        if isinstance(data, dict) and 'details' in data:
+            return data['details']
         return None
         
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching keyword data: {str(e)}")
-        if hasattr(e.response, 'text'):
+        if hasattr(e, 'response') and hasattr(e.response, 'text'):
             st.error(f"Response content: {e.response.text}")
         return None
 
@@ -131,7 +129,7 @@ def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None,
             all_results.extend(batch_data)
         
         # Small delay to prevent rate limiting
-        time.sleep(0.5)  # Increased delay to be more conservative
+        time.sleep(0.5)
     
     progress_text.empty()
     progress_bar.empty()
@@ -149,12 +147,14 @@ def process_results(data, original_keywords):
             if keyword in results_dict:
                 # Try to get search volume from different possible locations
                 search_volume = None
-                traffic_data = item.get('traffic_data', {})
-                if isinstance(traffic_data, dict):
-                    search_volume = traffic_data.get('monthly_searches')
+                search_data = item.get('search_data', {})
+                if isinstance(search_data, dict):
+                    search_volume = search_data.get('search_volume')
+                    if search_volume is None:
+                        search_volume = search_data.get('monthly_searches')
                 
                 if search_volume is None:
-                    search_volume = item.get('monthly_searches')
+                    search_volume = item.get('search_volume')
                 
                 if search_volume is not None:
                     try:
