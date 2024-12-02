@@ -13,27 +13,28 @@ st.set_page_config(
 
 def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_date=None):
     """Get keyword data from SEOmonitor API"""
-    base_url = "https://api.seomonitor.com/v3/rank-tracker/v3.0/keywords"
+    base_url = "https://api.seomonitor.com/v3/rank-tracker/keywords/search-data"
     
     headers = {
         'Accept': 'application/json',
         'Authorization': api_key
     }
     
-    params = {
-        'campaign_id': campaign_id,
-        'start_date': start_date or (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
-        'end_date': end_date or datetime.now().strftime('%Y-%m-%d'),
-        'keywords': ','.join(keywords)  # Send keywords as comma-separated list
+    # Convert keywords to the format expected by the API
+    keyword_data = {
+        'campaign_id': int(campaign_id),
+        'keywords': keywords
     }
     
     try:
-        response = requests.get(base_url, headers=headers, params=params)
+        response = requests.post(base_url, headers=headers, json=keyword_data)
         if response.status_code == 401:
             st.error("Authentication failed. Please check your API key.")
             return None
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        st.write("API Response:", data)  # Debug output
+        return data
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching keyword data: {str(e)}")
         return None
@@ -53,8 +54,8 @@ def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None,
         progress_text.text(f"Processing batch {batch_num + 1}/{total_batches} (keywords {start_idx + 1}-{end_idx})...")
         
         batch_data = get_keyword_data_batch(api_key, campaign_id, current_batch, start_date, end_date)
-        if batch_data and isinstance(batch_data, list):
-            all_results.extend(batch_data)
+        if batch_data and isinstance(batch_data, dict) and 'details' in batch_data:
+            all_results.extend(batch_data['details'])
         
         time.sleep(0.1)  # Small delay to prevent rate limiting
     
@@ -71,8 +72,9 @@ def process_results(data, original_keywords):
         try:
             keyword = item.get('keyword', '')
             if keyword in results_dict:
-                search_data = item.get('search_data', {}) or {}
-                results_dict[keyword]['search_volume'] = int(search_data.get('search_volume', 0) or 0)
+                search_volume = item.get('search_volume', 0)
+                if search_volume is not None:
+                    results_dict[keyword]['search_volume'] = int(search_volume)
         except (TypeError, ValueError) as e:
             st.warning(f"Error processing keyword {item.get('keyword', 'unknown')}: {str(e)}")
             continue
