@@ -14,7 +14,7 @@ st.set_page_config(
 
 def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_date=None):
     """Get keyword data from SEOmonitor API"""
-    base_url = "https://apigw.seomonitor.com/v3/rank-tracker/v3.0/keywords"
+    base_url = "https://apigw.seomonitor.com/v3/rank-tracker/v3.0/keywords/search-data"
     
     headers = {
         'Accept': 'application/json',
@@ -23,8 +23,6 @@ def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_
     
     params = {
         'campaign_id': campaign_id,
-        'start_date': start_date or (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
-        'end_date': end_date or datetime.now().strftime('%Y-%m-%d'),
         'keywords': ','.join(keywords)  # Send keywords as comma-separated list
     }
     
@@ -34,7 +32,9 @@ def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_
             st.error("Authentication failed. Please check your API key.")
             return None
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        st.write("API Response:", data)  # Debug print
+        return data
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching keyword data: {str(e)}")
         return None
@@ -54,8 +54,8 @@ def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None,
         progress_text.text(f"Processing batch {batch_num + 1}/{total_batches} (keywords {start_idx + 1}-{end_idx})...")
         
         batch_data = get_keyword_data_batch(api_key, campaign_id, current_batch, start_date, end_date)
-        if batch_data and isinstance(batch_data, list):
-            all_results.extend(batch_data)
+        if batch_data and isinstance(batch_data, dict):
+            all_results.append(batch_data)
         
         time.sleep(0.1)  # Small delay to prevent rate limiting
     
@@ -64,18 +64,23 @@ def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None,
 
 def process_results(data, original_keywords):
     """Process the API results into a DataFrame"""
+    if not data or not isinstance(data, dict) or 'details' not in data:
+        st.error("Invalid API response format")
+        return []
+
     # Create a dictionary with all keywords initialized to 0 search volume
     results_dict = {keyword: {'keyword': keyword, 'search_volume': 0} for keyword in original_keywords}
     
     # Update search volumes for keywords found in the API response
-    for item in data:
+    for keyword_data in data['details']:
         try:
-            keyword = item.get('keyword', '')
+            keyword = keyword_data.get('keyword', '')
             if keyword in results_dict:
-                search_data = item.get('search_data', {}) or {}
-                results_dict[keyword]['search_volume'] = int(search_data.get('search_volume', 0) or 0)
+                search_volume = keyword_data.get('search_volume', 0)
+                if search_volume is not None:
+                    results_dict[keyword]['search_volume'] = int(search_volume)
         except (TypeError, ValueError) as e:
-            st.warning(f"Error processing keyword {item.get('keyword', 'unknown')}: {str(e)}")
+            st.warning(f"Error processing keyword {keyword}: {str(e)}")
             continue
     
     return list(results_dict.values())
@@ -127,8 +132,12 @@ def main():
                     )
                     
                     if results_data is not None:
-                        results = process_results(results_data, keywords)
-                        results_df = pd.DataFrame(results)
+                        all_results = []
+                        for data in results_data:
+                            results = process_results(data, keywords)
+                            all_results.extend(results)
+                        
+                        results_df = pd.DataFrame(all_results)
                         
                         st.markdown("###  Results")
                         if not results_df.empty:
