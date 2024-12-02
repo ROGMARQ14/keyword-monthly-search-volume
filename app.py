@@ -11,7 +11,7 @@ st.set_page_config(
     layout="wide"
 )
 
-def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_date=None):
+def get_keyword_data_batch(api_key, campaign_id, offset=0, start_date=None, end_date=None):
     """Get keyword data from SEOmonitor API"""
     base_url = "https://apigw.seomonitor.com/v3/rank-tracker/v3.0/keywords"
     
@@ -30,8 +30,8 @@ def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_
         'campaign_id': campaign_id,
         'start_date': start_date,
         'end_date': end_date,
-        'group_id': '0',  # Get all keywords
-        'limit': '1000'
+        'limit': '100',
+        'offset': str(offset)
     }
     
     try:
@@ -52,21 +52,50 @@ def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_
 def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None, end_date=None, batch_size=100):
     """Process keywords in batches"""
     all_results = []
+    keyword_set = {k.lower() for k in keywords}
     
     progress_text = st.empty()
-    progress_text.text("Fetching keyword data...")
+    progress_bar = st.progress(0)
     
-    # Get all keywords from the campaign
-    campaign_data = get_keyword_data_batch(api_key, campaign_id, keywords, start_date, end_date)
+    # Initialize offset and total processed
+    offset = 0
+    total_processed = 0
+    max_retries = 10  # Maximum number of empty results before stopping
+    empty_results_count = 0
     
-    if campaign_data and isinstance(campaign_data, list):
-        # Filter for only our keywords of interest
-        keyword_set = {k.lower() for k in keywords}
-        for item in campaign_data:
-            if isinstance(item, dict) and item.get('keyword', '').lower() in keyword_set:
-                all_results.append(item)
+    while True:
+        progress_text.text(f"Fetching keywords (offset: {offset})...")
+        progress_bar.progress(min(total_processed / len(keywords), 1.0))
+        
+        # Get batch of keywords from the campaign
+        batch_data = get_keyword_data_batch(api_key, campaign_id, offset, start_date, end_date)
+        
+        if not batch_data or not isinstance(batch_data, list) or len(batch_data) == 0:
+            empty_results_count += 1
+            if empty_results_count >= max_retries:
+                break
+            offset += batch_size
+            continue
+        
+        # Reset empty results counter if we got data
+        empty_results_count = 0
+        
+        # Process the batch
+        for item in batch_data:
+            if isinstance(item, dict):
+                keyword = item.get('keyword', '').lower()
+                if keyword in keyword_set:
+                    all_results.append(item)
+                    total_processed += 1
+        
+        # If we got less than the batch size, we've reached the end
+        if len(batch_data) < batch_size:
+            break
+            
+        offset += batch_size
     
     progress_text.empty()
+    progress_bar.empty()
     return all_results
 
 def process_results(data, original_keywords):
