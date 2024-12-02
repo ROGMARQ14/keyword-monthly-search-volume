@@ -153,10 +153,7 @@ def main():
                             st.dataframe(
                                 results_df.style.format({
                                     'search_volume': '{:,.0f}'
-                                }).background_gradient(
-                                    subset=['search_volume'],
-                                    cmap='Blues'
-                                ),
+                                }),
                                 height=400
                             )
                             
