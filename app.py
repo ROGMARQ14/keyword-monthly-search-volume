@@ -9,7 +9,7 @@ def get_keyword_data(api_key, campaign_id, keywords=None, start_date=None, end_d
     
     headers = {
         'Accept': 'application/json',
-        'Authorization': f'Bearer {api_key}'
+        'Authorization': api_key
     }
     
     params = {
@@ -21,6 +21,9 @@ def get_keyword_data(api_key, campaign_id, keywords=None, start_date=None, end_d
     
     try:
         response = requests.get(base_url, headers=headers, params=params)
+        if response.status_code == 401:
+            st.error("Authentication failed. Please check your API key.")
+            return []
         response.raise_for_status()
         data = response.json()
         
