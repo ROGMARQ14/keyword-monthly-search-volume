@@ -14,20 +14,21 @@ st.set_page_config(
 
 def get_keyword_data_batch(api_key, campaign_id, keywords, start_date=None, end_date=None):
     """Get keyword data from SEOmonitor API"""
-    base_url = "https://apigw.seomonitor.com/v3/rank-tracker/v3.0/keywords/search-data"
+    base_url = "https://apigw.seomonitor.com/v3/rank-tracker/keywords/get-keywords-data"
     
     headers = {
         'Accept': 'application/json',
-        'Authorization': api_key
+        'Authorization': api_key,
+        'Content-Type': 'application/json'
     }
     
-    params = {
-        'campaign_id': campaign_id,
-        'keywords': ','.join(keywords)  # Send keywords as comma-separated list
+    data = {
+        'campaign_id': int(campaign_id),
+        'keywords': keywords
     }
     
     try:
-        response = requests.get(base_url, headers=headers, params=params)
+        response = requests.post(base_url, headers=headers, json=data)
         if response.status_code == 401:
             st.error("Authentication failed. Please check your API key.")
             return None
@@ -54,8 +55,8 @@ def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None,
         progress_text.text(f"Processing batch {batch_num + 1}/{total_batches} (keywords {start_idx + 1}-{end_idx})...")
         
         batch_data = get_keyword_data_batch(api_key, campaign_id, current_batch, start_date, end_date)
-        if batch_data and isinstance(batch_data, dict):
-            all_results.append(batch_data)
+        if batch_data:
+            all_results.extend(batch_data.get('keywords', []))
         
         time.sleep(0.1)  # Small delay to prevent rate limiting
     
@@ -64,19 +65,15 @@ def process_keywords_in_batches(api_key, campaign_id, keywords, start_date=None,
 
 def process_results(data, original_keywords):
     """Process the API results into a DataFrame"""
-    if not data or not isinstance(data, dict) or 'details' not in data:
-        st.error("Invalid API response format")
-        return []
-
     # Create a dictionary with all keywords initialized to 0 search volume
     results_dict = {keyword: {'keyword': keyword, 'search_volume': 0} for keyword in original_keywords}
     
     # Update search volumes for keywords found in the API response
-    for keyword_data in data['details']:
+    for item in data:
         try:
-            keyword = keyword_data.get('keyword', '')
+            keyword = item.get('keyword', '')
             if keyword in results_dict:
-                search_volume = keyword_data.get('search_volume', 0)
+                search_volume = item.get('search_volume', 0)
                 if search_volume is not None:
                     results_dict[keyword]['search_volume'] = int(search_volume)
         except (TypeError, ValueError) as e:
@@ -132,12 +129,9 @@ def main():
                     )
                     
                     if results_data is not None:
-                        all_results = []
-                        for data in results_data:
-                            results = process_results(data, keywords)
-                            all_results.extend(results)
+                        all_results = results_data
                         
-                        results_df = pd.DataFrame(all_results)
+                        results_df = pd.DataFrame(process_results(all_results, keywords))
                         
                         st.markdown("###  Results")
                         if not results_df.empty:
